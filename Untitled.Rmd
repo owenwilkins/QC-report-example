@@ -1,0 +1,377 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+title: "ATAC-seq Quality Control Report"
+author: 'Produced by: Owen Wilkins'
+subtitle: 'Experiments: 10/04/19'
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = 'asis')
+#knitr::opts_knit$set(root.dir = "omw/BISR/Chameberlin/")
+options(width = 120)
+```
+<br>
+
+# Summary 
+
+This report summarizes select quality control measures for four samples with biological replciates from two sequencing runs processed using the ENCODE ATAC-seq pipeline (v1.4.1) (https://www.encodeproject.org/atac-seq/). **The goal of this report is to summarize the most important QC metrics so that they can be compared across samples for a single experiment**. Sample specific QC reports in HTML reports are provided separately, and provide additional QC details not included here. 
+
+As a brief summary of the major pipeline processing steps, reads are fist trimmed using the **cutadapt** algorithm to remove reads containing the Nexetra barcodes. Reads were subsequently aligned to the **mouse genome (mm10)** using **Bowtie2**. Peaks are then called for aligned and filtered reads using the **MACS2** algorithm. The called peaks are then evaluated for reproducility using the **Irreproducible Discovery rate (IDR)**, a statistical method that evaluates consistency between replicates in high throughput experiments. Now that we have replicates for this experiment, IDR evaluates reproucibility using these to determine the final peak set (the **conservative peak set** in the file outputs, named *conservative_peak.narrowPeak.gz*). This is the peak set that should be used in downstream analysis. Full details of the pipeline and the files produced can be found at https://github.com/ENCODE-DCC/atac-seq-pipeline. 
+
+Overall, critical quality control metrics for all four samples look great, and reproducibility between replicates was high. The only QC metric that was flagged was the ratio nucleosome-free region (NFR) reads to mononucleosome reads (discussed in more detail below), the same metric that was flagged when we ran the first set alone for these samples, before we had the bilogical replicates. While I discuss this in more detail below, briefly, all of your samples except for one (Tx rep 3 rep2) were below the suggested value of 2.5 for this ratio. Being low for this value indicates that there are fewer small fragments (that is, those in the NFR) than expected, suggesting some small fragments may be getting lost during the sample preparation. While this metric dosen't necessarily indicate a quality issue, it is worth keeping in mind while conducting the downstream analyses, and if this is something that can/should be addressed in future sample preps. 
+
+The only other thing I would mention here is that two samples did show slightly different fragment length distributions (S1 and S2) in replicate 1 compared to replicate 2. This doesn't seem to be an issue as the number of IDR peaks identified is roughly the same as for the other two samples, but again, worth keeping in mind if smaller fragments may be getting lost in sample prep. Otherwise, your samples look excellent. 
+
+```{r, message=F, echo=F, results='hide', warning=F}
+
+# ==========================================================================================
+# Initialization
+# ==========================================================================================
+# packages
+library(stringr)
+library(ggpubr)
+library(xtable)
+library(kableExtra)
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+
+# set sirectories 
+dir1 <- "/Users/omw/BISR/Labs/Pattabirman/atac-seq-/Files/"
+dir2 <- "/Users/omw/BISR/Labs/Pattabirman/atac-seq-Figures/"
+dir3 <- "/Users/omw/BISR/Labs/Pattabirman/atac-seq-/Figures/ATAC_10-8-19/"
+
+# read in QC data 
+qc <- read.csv(paste0(dir1, "qc_metrics_example.csv"), stringsAsFactors = FALSE)
+
+# function to prepare data for barplots 
+transform_1 <- function(x, vars){
+  #x <- qc
+  #vars <- c("Read.count.from.sequencer_2", 
+  #                            "Read.count.successfully.aligned_2", 
+  #                            "Read.count.after.filtering.for.mapping.quality_2", 
+  #                            "Read.count.after.removing.duplicate.reads_2",
+  #                            "Read.count.after.removing.mitochondrial.reads..final.read.count._2")
+  
+  samp <- rep(x$sample, length(vars))
+  
+  var_type <- list()
+  for(j in 1:length(vars)){
+    var_type[[j]] <-  rep(vars[j], length(unique(samp)))
+  }
+  var_type_2 <- unlist(var_type)
+  
+  var_dat <- list()
+  for(i in 1:length(vars)){
+    var_dat[[i]] <- x[,vars[i]]
+  }
+  var_dat2 <- unlist(var_dat)
+  
+  xt <- data.frame(samp, var_type_2, var_dat2)
+  xt$var_type_2 <- as.character(xt$var_type_2)
+  colnames(xt) <- c("sample", "type", "dat")
+  return(xt)
+}
+
+```
+
+## Filtering of raw reads
+
+Raw reads are filtered based on whether or not they were successfully aligned, aligned with sufficient quality, are duplicates, or align to mitochondrial or other blacklisted regions of the genome. Below, this plot indicates the total number of reads present after each of these filtering steps. The black line indicates the suggested minimum number of final reads for a reasonable ATAC-seq experiment (25 million). 
+
+```{r, echo=FALSE}
+
+# scale to millions of reads 
+qc$Read.count.from.sequencer_2 <- round(qc$Read.count.from.sequencer/1000000, digits=0)
+qc$Read.count.successfully.aligned_2 <- round(qc$Read.count.successfully.aligned/1000000, digits=0)
+qc$Read.count.after.filtering.for.mapping.quality_2 <- round(qc$Read.count.after.filtering.for.mapping.quality/1000000, digits=0)
+qc$Read.count.after.removing.duplicate.reads_2 <- round(qc$Read.count.after.removing.duplicate.reads/1000000, digits=0)
+qc$Read.count.after.removing.mitochondrial.reads..final.read.count._2 <- round(qc$Read.count.after.removing.mitochondrial.reads..final.read.count./1000000, digits=0)
+
+# tranbsform into data structure for barplots 
+qc_reads <- transform_1(qc, c("Read.count.from.sequencer_2", 
+                              "Read.count.successfully.aligned_2", 
+                              "Read.count.after.filtering.for.mapping.quality_2", 
+                              "Read.count.after.removing.duplicate.reads_2",
+                              "Read.count.after.removing.mitochondrial.reads..final.read.count._2"))
+
+# renameread types more intuitively 
+qc_reads$type[qc_reads$type=="Read.count.from.sequencer_2"] <- "Total raw reads" 
+qc_reads$type[qc_reads$type=="Read.count.successfully.aligned_2"] <- "Successfully aligned" 
+qc_reads$type[qc_reads$type=="Read.count.after.filtering.for.mapping.quality_2"] <- "After mapping quality filtering aligned"
+qc_reads$type[qc_reads$type=="Read.count.after.removing.duplicate.reads_2"] <- "After removing duplicates"
+qc_reads$type[qc_reads$type=="Read.count.after.removing.mitochondrial.reads..final.read.count._2"] <- "Final read count"
+
+qc_reads$type <- factor(qc_reads$type, levels = c("Total raw reads", "Successfully aligned", 
+                                                  "After mapping quality filtering aligned", 
+                                                  "After removing duplicates", "Final read count"))
+
+# produce base plot 
+p <- ggbarplot(qc_reads, "sample", "dat",
+          fill = "type", 
+          color = "type", 
+          #palette = c("steelblue", "steelblue1", "steelblue2", "steelblue3", "steelblue4"),
+          palette = c("salmon", "indianred1", "indianred2", "indianred3", "indianred4"),
+          label = TRUE, ylab= "Reads (millions)", xlab = "Sample",
+          position = position_dodge(0.9),
+          legend = "top", legend.title="", lab.size = 3, x.text.angle = 30)
+
+```
+
+```{r, echo=F, fig.height = 5, fig.width = 11, fig.align= 'center'}
+# bean plot of densities 
+p + geom_hline(yintercept = 25, colour="black", linetype="dashed") + 
+  theme(panel.background = element_rect(fill = "gray95")) + 
+  theme(panel.grid.major = element_line(colour = "white"),
+        panel.grid.minor = element_line(colour = "white"))
+```
+
+Overall, the mapping rate was excellent for all samples (generally >98%), an acceptable proportions of reads were filtered in subsequent steps, and your final read count is above the suggested minimum of 25 million for good ATAC-seq experminets, with enough reads for most downstream ATAC applications. There is obviously a large difference in depth between rep 1 and rep 2, as they were run on separate sequencing runs, although the four samples are all well balanced in terms of coverage within each run. The Tx rep 3 samples ended up with slightly deeper sequencing in the second run (rep 2) than the other 3 samples. 
+
+## Library complexity
+
+Three library complexity statistics are used to evaluate the sequenced data. NRF (non-redundant fraction) represents the  fraction of non-redundant reads in your library. 0.7-0.9 is an acceoptable range for the NRF, with < 0.7 indicating a concerning level of low complexity in a library, and >0.9 being the ideal range. Dashed lines are present on the plot at 0.7, 0.8, 0.9 and 1.0. 
+
+The PCR bottle neck coefficients (PBC1 and 2) measure how skewed the read count distribution is toward 1 or more reads per location. PBC1 measures the ratio of number of genomic loci where EXACTLY one read pair maps, to the number of genomic loci where AT LEAST ONE read pair maps. The same ranges of acceptable values for NRF apply for PBC1, with values closer to 1 indicating less PCR bottlenecking. 
+
+PBC2 measures the ratio of number of genomic locations where only one read pair maps uniquely, over the number of genomic locations where two read pairs map uniqely. Ideally PBC2 should be above 3, although values of 1-3 are acceptable, but indicate moderate PCR bottlenecking. In the plot below, PBC2 values are presented as PBC2/10, to scale them similarly to NRF and PBC1 (so you can multiply the plotted values by 10 to get the raw PBC2). 
+
+```{r, echo=FALSE}
+
+qc_libcomp <- transform_1(qc, c("NRF", "PBC1", "PBC2"))
+#qc_libcomp$type[qc_libcomp$type=="Fraction.of.reads.in.NFR"] <- "Fraction reads in NFR" 
+#qc_libcomp$type[qc_libcomp$type=="NFR...mono.nuc.reads"] <- "NFR reads/Mono-nuclesome reads" 
+s1 <- sapply(as.character(qc_libcomp$dat), function(x) strsplit(x, "\\[")[[1]][2])
+s2 <- sapply(s1, function(x) strsplit(x, ",")[[1]][1])
+qc_libcomp$dat <- round(as.numeric(s2), digits = 2)
+
+qc_libcomp2 <- qc_libcomp[1:8,]
+qc_libcomp2$nrf <- qc_libcomp$dat[1:8]
+qc_libcomp2$pbc1 <- qc_libcomp$dat[9:16]
+qc_libcomp2$pbc2 <- qc_libcomp$dat[17:24]
+
+qc_libcomp2 <- qc_libcomp2[, c(1,4,5,6)]
+#colnames(qc_nfr2) <- c("Sample", "Fraction reads in NFR", "NFR reads/Mono-nuclesome reads")
+
+hline_data <- data.frame(z = c(0.8, 0.8, 3), measure = c("Non-redundant fraction (NRF)", 
+                                                 "PCR bottleneck coefficient 1 (PBC1)", 
+                                                 "PCR bottleneck coefficient 2 (PBC2)"))
+
+qc_libcomp2long <- gather(qc_libcomp2, key="measure", value="value", c("nrf", "pbc1", "pbc2"))
+
+qc_libcomp2long$cols <- c(rep("steelblue3", 8), rep("indianred2", 8),  rep("indianred3", 8))
+qc_libcomp2long$measure[qc_libcomp2long$measure=="nrf"] <- "Non-redundant fraction (NRF)" 
+qc_libcomp2long$measure[qc_libcomp2long$measure=="pbc1"] <- "PCR bottleneck coefficient 1 (PBC1)" 
+qc_libcomp2long$measure[qc_libcomp2long$measure=="pbc2"] <- "PCR bottleneck coefficient 2 (PBC2)" 
+
+
+```
+
+```{r, echo=F, fig.height = 8.5, fig.width = 7, fig.align= 'center'}
+ggplot(qc_libcomp2long, label = TRUE)+
+  xlab("Sample") + ylab("Fraction/Ratio")+
+  geom_bar(aes(x=sample, y=value), stat='identity', fill=qc_libcomp2long$cols)+
+  geom_hline(data = hline_data, aes(yintercept = z), linetype = "dashed") +
+  facet_wrap(~measure, ncol=1, scales = "free") +
+  theme(axis.text.x  = element_text(angle=45, vjust=1, hjust = 1))
+```
+
+Your NRF, PBC1, and PBC2 values are all exceelent and above the suggested minimum values. 
+
+
+## TSS enrichment
+
+Transcriptional start site (TSS) enrichment is a measure of signal-to-noise. This metric is determined using the genome annotation to which you aligned (here, hg38). Briefly, a calculation is performed which determines the enrichment of reads at TSSs, relative to the read count distribution across the 1000bp surrounding each TSS in either direction. For a good ATAC-seq experiment, we expect to see an enrichment of reads at TSS coordinates relative to the surrounding region, given that there should be many TSSs with open chromatin. TSS enrichment values of 5-7 for hg38 are considered acceptable, and >7 is ideal. 
+
+```{r, echo=FALSE}
+qc_tss <- transform_1(qc, c("TSS_enrichment"))
+qc_tss$dat <- round(qc_tss$dat, digits=1)
+
+p <- ggbarplot(qc_tss, "sample", "dat",
+               fill = "type", 
+               color = "type", 
+               palette = c("mediumpurple3"),
+               label = TRUE, ylab= "TSS enrichment", xlab = "Sample",
+               #position = position_dodge(0.9), 
+               ylim=c(0,40),
+               legend = "top", legend.title="", x.text.angle = 30, lab.size = 3.5)
+
+```
+
+```{r, echo=F, fig.height = 4.5, fig.width = 7, fig.align= 'center'}
+p + geom_hline(yintercept = 7, colour="black", linetype="dashed") + font("xy.text", size = 9.5) + 
+  theme(panel.background = element_rect(fill = "gray95")) + 
+  theme(panel.grid.major = element_line(colour = "white"),
+        panel.grid.minor = element_line(colour = "white"))
+
+```
+
+Your TSS enrichments are all **well** above 7, indicating excellent signal-to-noise in both runs.  
+
+
+
+
+## Reads in nucleosome-free region 
+
+By assembling reads into contigs, we can assess fragment lengths and infer the proportion of reads in the nucleosome-free region (NFR), as well as those spanning the the mono-nucleosome region, and so on. Typically, you expect the a large fraction of your reads to be located in the NFR, and decreasing numbers of fragments in the mono- and di-nuclesome regions. The fraction of reads in the NFR, and the ratio of NFR reads to mono-nucelosome reads (both presented below) are used to indicate assess this expectation for ATAC-seq experiments. 
+
+Minimum values of 0.4 and 2.5 are suggested for these metrics, respectively. In the plot below, the red line represents this minimum suggested value for the fraction of reads in NFR (the red bars), and the blue line represents the minimum suggested value for the ratio of NFR reads to mono-nucleosome reads (blue bars). 
+
+```{r, echo=FALSE}
+qc_nfr <- transform_1(qc, c("Fraction.of.reads.in.NFR", "NFR...mono.nuc.reads"))
+qc_nfr$type[qc_nfr$type=="Fraction.of.reads.in.NFR"] <- "Fraction reads in NFR" 
+qc_nfr$type[qc_nfr$type=="NFR...mono.nuc.reads"] <- "NFR reads/Mono-nuclesome reads" 
+s1 <- sapply(as.character(qc_nfr$dat), function(x) strsplit(x, "\\[")[[1]][2])
+s2 <- sapply(s1, function(x) strsplit(x, ",")[[1]][1])
+qc_nfr$dat <- round(as.numeric(s2), digits = 2)
+
+qc_nfr2 <- qc_nfr[1:8,]
+qc_nfr2$fnfr <- qc_nfr$dat[1:8]
+qc_nfr2$nfr2mn <- qc_nfr$dat[9:16]
+qc_nfr2 <- qc_nfr2[, c(1,4,5)]
+#colnames(qc_nfr2) <- c("Sample", "Fraction reads in NFR", "NFR reads/Mono-nuclesome reads")
+
+hline_data <- data.frame(z = c(0.4, 2.5), measure = c("Fraction reads in NFR", "NFR reads/Mono-nuclesome reads"))
+
+qc_nfr2long <- gather(qc_nfr2, key="measure", value="value", c("fnfr", "nfr2mn"))
+
+qc_nfr2long$cols <- c(rep("steelblue3", 8), rep("indianred2", 8))
+qc_nfr2long$measure[qc_nfr2long$measure=="fnfr"] <- "Fraction reads in NFR" 
+qc_nfr2long$measure[qc_nfr2long$measure=="nfr2mn"] <- "NFR reads/Mono-nuclesome reads" 
+```
+
+```{r, echo=F, fig.height = 6, fig.width = 7, fig.align= 'center'}
+ggplot(qc_nfr2long)+
+  xlab("Sample") + ylab("Fraction/Ratio")+
+  geom_bar(aes(x=sample, y=value), stat='identity', fill=qc_nfr2long$cols)+
+  geom_hline(data = hline_data, aes(yintercept = z), linetype = "dashed") +
+  facet_wrap(~measure, ncol=1, scales = "free") +
+  theme(axis.text.x  = element_text(angle=45, vjust=1, hjust = 1))
+```
+
+Your samples were all above the suggested threshold for fraction of reads in NFRs, however, as we described in the QC report for the first set of samples previously, most of your samples were below the suggested threshold for the ratio of NFR reads/mono-nuc. reads. This is because there are fewer reads in your NFR region, and more in the mono-nucleosome region, that would be expected. While none of these values suggest we remove specific replicates or samples, nor do they suggest there is necessairily anything wrong with the quality, it is worth considering why you are ending up with fewer small fragments. One possibility is this could be related to something occuring during the sample prepartion, resulting in a loss of smaller fragments. As noted above, this metric dosen't necessarily indicate a quality issue, but is worth keeping in mind while conducting the downstream, and if this is something that can/should be addressed in future sample preps. 
+
+
+## Fragment length distribution 
+
+As above for assessment of reads in nucleosome-free regions, by assembling aligned reads into contigs we can plot the distribution of fragment lengths from each sample (and replicate). Peaks representative of the nucleosome-free region are shown at approximately 100bp, with subsequent peaks representing larger fragments from mononucleosomes, di-nucleosomes, etc. Log of the normalized read density is shown on the y axis of inset plots (blue line), to help observe the periodicity of peaks as fraghment size increases. 
+<br>
+
+```{r image_grobs, fig.show = "hold", out.width = "50%", fig.align = "default", echo=F}
+knitr::include_graphics(paste0(dir3, "Control_rep1_fragment_dist.png"))
+knitr::include_graphics(paste0(dir3, "Control_rep2_fragment_dist.png"))
+```
+
+```{r image_grobs1, fig.show = "hold", out.width = "50%", fig.align = "default", echo=F}
+knitr::include_graphics(paste0(dir3, "PAC_rep1_fragment_dist.png"))
+knitr::include_graphics(paste0(dir3, "PAC_rep2_fragment_dist.png"))
+```
+
+```{r image_grobs2, fig.show = "hold", out.width = "50%", fig.align = "default", echo=F}
+knitr::include_graphics(paste0(dir3, "VIN_rep1_fragment_dist.png"))
+knitr::include_graphics(paste0(dir3, "VIN_rep2_fragment_dist.png"))
+```
+
+```{r image_grobs3, fig.show = "hold", out.width = "50%", fig.align = "default", echo=F}
+knitr::include_graphics(paste0(dir3, "ERI_rep1_fragment_dist.png"))
+knitr::include_graphics(paste0(dir3, "ERI_rep2_fragment_dist.png"))
+```
+
+Replicate 1 for Tx rep 1 and Tx rep 2 seem to have sligtly higher densities of reads in the mononucleosome region than replicate two for these samples. This doesn't seem to be much of an issue as the number of peaks removed by IDR is generally consistent with the other samples (Control and Tx rep 3), however, as mentioned above, still worth considering if there is a reason why you may be lossing a proportion of smaller fragments during the prepartion of some samples. 
+
+
+
+## Reproducibility of called peaks
+
+To assess the reporducibility of the called peaks (and remove unreliable ones) we determine the subset of peaks that overlap between replicates (or pseudoreplicates) and contrast this with the number of peaks identified through a statistical procedure called the **Irreproducible Discovery rate (IDR)**. IDR identifies a **conservative peak set** (when replicates are present) or **optimal peak set** (when no replicates present, and only pseudoreplicates are used) containing higher confidence peaks. The IDR value for a given peak is interpretted as the probability that the peak is not reproducible between a set of replicates (or pseudoreplicates), therefore a small IDR value indicates it is unlikely that this peak is not reproducible. Here, we remove peaks that have an IDR value of >= 0.05. It is important to remember that, statistically, 5% of the peaks that we call reproducible are actually not reproducible, they just appear as if they are due to chance. 
+
+Generally, most downstream analyses will benefit from use of the conservative or optimal peak set identified by the IDR procedure, rather than using the raw overlap of called peaks between replicates. However, if the hypothesis being tested is very exploratory, and you are willing to accept more false positives to reduce the risk of accepting false negatives, then you could consider use of the raw overlapping peaks (assuming replicates are present). 
+
+Below, we provide the peaks identified as reproducible in the IDR procedure, as well as the overlapping peaks between replicates. Your experiment includes **biological replicates** therefore the number of IDR peaks is reflective of the **conservative** IDR peak set. The dashed line at 300K peaks represents the limit for the maximum number of peaks that could be called in a given sample by MACS2. 
+
+```{r, echo=FALSE}
+idr <- transform_1(qc, c("overlap_nt", "idr_nt"))
+idr$type[idr$type=="overlap_nt"] <- "No. overlapping peaks" 
+idr$type[idr$type=="idr_nt"] <- "No. IDR peaks" 
+idr$dat <- round(idr$dat, digits = 2)
+
+idr2 <- idr[!is.na(idr$dat),]
+idr2$sample <- sapply(idr2$sample, function(x) strsplit(as.character(x), " ")[[1]][1])
+idr2$dat <- round(idr2$dat/1000, digits = 1)
+
+p <- ggbarplot(idr2, "sample", "dat",
+               fill = "type", 
+               color = "type", 
+               palette = c("steelblue3", "indianred2"),
+               label = TRUE, ylab= "Number of peaks (thousands)", xlab = "Sample",
+               position = position_dodge(0.9), 
+               ylim=c(0, 390),
+               legend = "top", legend.title="", x.text.angle = 30, lab.size = 3.5)
+
+```
+
+```{r, echo=F, fig.height = 4.5, fig.width = 7, fig.align= 'center'}
+p + font("xy.text", size = 9.3) + geom_hline(yintercept = 300, colour="black") + 
+  theme(panel.background = element_rect(fill = "gray95")) + 
+  theme(panel.grid.major = element_line(colour = "white"),
+        panel.grid.minor = element_line(colour = "white"))
+```
+
+On average, the IDR procedure removed approximately 90-100K peaks per sample compared to the raw overlapping peaks, and the total number of IDR peaks across samples was very consistent. Overall, these data indicate effective modelling and removal of inconsistent peaks. 
+
+
+
+
+## Fraction of reads in peaks (FRiP)
+
+The fraction of reads in peaks (FRiP) represents the proportion of total reads used for peak calling which are actually located in called peaks. This metric gives a general idea of the success of the experiment as a reasonable proportion of reads should fall in called peak regions. For ATAC-seq data, a minimum threshold FRiP value of 0.3 is suggested. Here, FRiP is provided for both the called peak set that overlaps between the pseudoreplicates (generated through subsampling of the single sample) and the peak set called after IDR analysis has been applied. 
+
+```{r, echo=FALSE}
+qc_frip <- transform_1(qc, c("frip_overlap", "frip_idr"))
+qc_frip$type[qc_frip$type=="frip_overlap"] <- "FRiP (overlapping peak set)" 
+qc_frip$type[qc_frip$type=="frip_idr"] <- "FRiP (IDR peak set)" 
+qc_frip$dat <- round(qc_frip$dat, digits = 2)
+
+qc_frip2 <- qc_frip[!is.na(qc_frip$dat),]
+qc_frip2$sample <- sapply(qc_frip2$sample, function(x) strsplit(as.character(x), " ")[[1]][1])
+
+
+p <- ggbarplot(qc_frip2, "sample", "dat",
+               fill = "type", 
+               color = "type", 
+               palette = c("steelblue3", "indianred2"),
+               label = TRUE, ylab= "Fraction of reads in peaks (FRiP)", xlab = "Sample",
+               position = position_dodge(0.9), 
+               ylim=c(0, 1),
+               legend = "top", legend.title="", x.text.angle = 30, lab.size = 3.5)
+
+```
+
+```{r, echo=F, fig.height = 4.5, fig.width = 7, fig.align= 'center'}
+p + geom_hline(yintercept = 0.3, colour="black", linetype="dashed") + font("xy.text", size = 9.3) + 
+  theme(panel.background = element_rect(fill = "gray95")) + 
+  theme(panel.grid.major = element_line(colour = "white"),
+        panel.grid.minor = element_line(colour = "white"))
+```
+
+Your FRiP values for both overlapping peaks (between pseduoreplicates) and IDR called peaks are both above the minimum threshold, indicating a proportion of reads in peaks concordant with a good quality ATAC-seq dataset. 
+
+
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
