@@ -79,7 +79,7 @@ transform_1 <- function(x, vars){
 
 ## Filtering of raw reads
 
-Raw reads are filtered based on whether or not they were successfully aligned, aligned with sufficient quality, are duplicates, or align to mitochondrial or other blacklisted regions of the genome. Below, this plot indicates the total number of reads present after each of these filtering steps. The black line indicates the suggested minimum number of final reads for a reasonable ATAC-seq experiment (25 million). 
+Raw reads are filtered based on whether or not they were successfully aligned, aligned with sufficient quality, are duplicates, or align to mitochondrial or other blacklisted regions of the genome. Below, this plot indicates the total number of reads present after each of these filtering steps. The black line indicates the suggested minimum number of final reads for a reasonable ATAC-seq experiment ( 25 million). 
 
 ```{r, echo=FALSE}
 
