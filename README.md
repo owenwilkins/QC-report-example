@@ -1,1 +1,0 @@
-# QC-report-example
